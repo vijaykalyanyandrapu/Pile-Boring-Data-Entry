@@ -1,0 +1,1 @@
+-- Local JSON database is used in this version. No SQLite installation is required.

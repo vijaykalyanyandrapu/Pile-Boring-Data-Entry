@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pile Log Database — Login</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body{display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f5f7fa}
+  .login-box{background:white;border:1px solid #dfe5eb;border-radius:12px;padding:32px;width:100%;max-width:360px;box-shadow:0 4px 18px rgba(20,32,43,.06)}
+  .login-box h1{font-size:20px;margin-bottom:4px}
+  .login-box p{color:#6b7785;font-size:13px;margin-bottom:20px}
+  .login-box label{font-size:13px;font-weight:650;color:#42505e;display:block;margin-bottom:14px}
+  .login-box input{margin-top:6px}
+  .login-box button{width:100%;margin-top:6px}
+  .error{color:#a11;font-size:13px;margin-top:12px;min-height:16px}
+</style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>Pile Log Database</h1>
+    <p>Sign in to continue.</p>
+    <form id="loginForm">
+      <label>Username
+        <input type="text" id="username" autocomplete="username" required autofocus>
+      </label>
+      <label>Password
+        <input type="password" id="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary">Sign in</button>
+      <p class="error" id="loginError"></p>
+    </form>
+  </div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (res.ok) {
+      const params = new URLSearchParams(window.location.search);
+      window.location.href = params.get('next') || '/';
+    } else {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.error || 'Incorrect username or password.';
+    }
+  } catch {
+    errEl.textContent = 'Network error. Please try again.';
+  }
+});
+</script>
+</body>
+</html>

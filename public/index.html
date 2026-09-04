@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pile Log Database</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Pile Log Database</h1>
+    <p>Digital pile bore log • 16B structure</p>
+  </div>
+  <div class="actions">
+    <button id="newBtn" class="primary">+ New Pile</button>
+    <button id="exportBtn">Download Excel</button>
+    <button id="logoutBtn">Log out</button>
+  </div>
+</header>
+
+<main>
+<section class="stats">
+  <div><b id="count">0</b><span>Total piles</span></div>
+  <div><b id="latest">—</b><span>Latest pile</span></div>
+</section>
+
+<section class="panel">
+  <div class="toolbar">
+    <input id="search" placeholder="Search pile ID or coordinates…">
+    <button id="refreshBtn">Refresh</button>
+  </div>
+  <div class="table-wrap">
+    <table><thead><tr><th>Pile ID</th><th>Coordinates</th><th>Boring date</th><th>Concrete volume</th><th>Updated</th><th></th></tr></thead>
+    <tbody id="pileRows"></tbody></table>
+  </div>
+</section>
+
+<section id="editor" class="panel hidden">
+  <div class="editor-head">
+    <div><h2 id="formTitle">New Pile</h2><p>Fixed headings, variable pile data.</p></div>
+    <button id="closeBtn">Close</button>
+  </div>
+  <form id="pileForm">
+    <input type="hidden" id="editingId">
+
+    <h3>Report Header</h3>
+    <div class="grid four">
+      <label>Company name<input id="company_name" placeholder="e.g. Saraswathi Construction"></label>
+      <label>Client name<input id="client_name" placeholder="e.g. APGENCO"></label>
+      <label>Serial No.<input id="serial_no"></label>
+      <label>Report date<input type="date" id="report_date"></label>
+      <label class="span-2">Project location<input id="project_location" placeholder="e.g. Dr.Narla Tata Rao Thermal Power Station, Coal Shed"></label>
+    </div>
+
+    <h3>Pile Details</h3>
+    <div class="grid four">
+      <label>Pile ID*<input id="pile_id" required></label>
+      <label>Rig No<input id="rig_no"></label>
+      <label>Location<input id="location"></label>
+      <label>Drawing no.<input id="drawing_no"></label>
+      <label>Dia. of Pile (mm)<input id="dia_of_pile" type="number"></label>
+      <label>Depth of Pile from CTL (M)<input id="depth_of_pile_ctl" type="number" step="0.01"></label>
+      <label>Founding Level<input id="founding_level"></label>
+      <label>Type<input id="type" placeholder="e.g. Bored Cast Insitu"></label>
+      <label>Co-ordinates<input id="coordinates"></label>
+      <label>Cut-off level (M)<input id="cutoff_level" type="number" step="0.001"></label>
+      <label>Top of Casing/Liner (M)<input id="top_of_casing" type="number" step="0.001"></label>
+      <label>Existing GL (M)<input id="existing_gl" type="number" step="0.001"></label>
+      <label>Cage Length (M)<input id="cage_length" type="number" step="0.01"></label>
+      <label>Boring completed date<input type="date" id="boring_completed_date"></label>
+    </div>
+
+    <h3>Boring Details</h3>
+    <div class="table-wrap">
+      <table class="entry"><thead><tr><th>Date</th><th>From</th><th>To</th><th>Depth (M)</th><th>Description of Soil</th><th>Remarks</th><th></th></tr></thead>
+      <tbody id="boringBody"></tbody></table>
+    </div>
+    <button type="button" id="addBoringRow" class="small-btn">+ Add boring row</button>
+
+    <h3>Cage & Trimmer Lowering</h3>
+    <div class="grid four">
+      <label>Cage started date<input type="date" id="cage_started_date"></label>
+      <label>Cage started time<input type="time" id="cage_started_time"></label>
+      <label>Cage completed date<input type="date" id="cage_completed_date"></label>
+      <label>Cage completed time<input type="time" id="cage_completed_time"></label>
+      <label>Trimmer started date<input type="date" id="trimmer_started_date"></label>
+      <label>Trimmer started time<input type="time" id="trimmer_started_time"></label>
+      <label>Trimmer completed date<input type="date" id="trimmer_completed_date"></label>
+      <label>Trimmer completed time<input type="time" id="trimmer_completed_time"></label>
+    </div>
+
+    <h3>Flushing</h3>
+    <div class="grid four">
+      <label>Started date<input type="date" id="flushing_started_date"></label>
+      <label>Started time<input type="time" id="flushing_started_time"></label>
+      <label>Completed date<input type="date" id="flushing_completed_date"></label>
+      <label>Completed time<input type="time" id="flushing_completed_time"></label>
+      <label>Specific gravity<input id="specific_gravity"></label>
+      <label>Bentonite before<input id="bentonite_before"></label>
+      <label>Bentonite after<input id="bentonite_after"></label>
+    </div>
+
+    <h3>Reinforcement Details</h3>
+    <p class="small">Diameter should be 25, 16, 12 or 8 (mm) to total correctly by size in the exported sheet.</p>
+    <div class="table-wrap">
+      <table class="entry"><thead><tr><th>Description</th><th>Diameter (mm)</th><th>Nos</th><th>Length (m)</th></tr></thead>
+      <tbody id="reinforcementBody"></tbody></table>
+    </div>
+
+    <h3>Concreting Details</h3>
+    <div class="grid four">
+      <label>Type of Cement<input id="cement_type" value="Ultra Tech Cement"></label>
+      <label>Grade of Concrete<input id="concrete_grade" value="M35"></label>
+      <label>Design Mix Ratio<input id="design_mix" value="420kG/Cum"></label>
+      <label>Slump at Site<input id="slump" value="170mm"></label>
+      <label>No. of cubes<input type="number" id="cubes_taken"></label>
+      <label>Commence date<input type="date" id="concrete_commence_date"></label>
+      <label>Commence time<input type="time" id="concrete_commence_time"></label>
+      <label>Completed date<input type="date" id="concrete_completed_date"></label>
+      <label>Completed time<input type="time" id="concrete_completed_time"></label>
+      <label>Actual concrete volume (M3)<input type="number" step="0.001" id="actual_concrete_volume"></label>
+    </div>
+    <div class="form-actions"><button type="submit" class="primary">Save Pile</button><button type="button" id="cancelBtn">Cancel</button></div>
+    <p id="message" class="message" aria-live="polite"></p>
+  </form>
+</section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
