@@ -10,7 +10,7 @@ const topLevelFields=[
   "pile_id","rig_no","location","drawing_no","dia_of_pile","depth_of_pile_ctl","founding_level",
   "type","coordinates","cutoff_level","top_of_casing","existing_gl","cage_length","boring_completed_date",
   "cage_started_date","cage_started_time","cage_completed_date","cage_completed_time",
-  "trimmer_started_date","trimmer_started_time","trimmer_completed_date","trimmer_completed_time",
+  "trimmie_started_date","trimmie_started_time","trimmie_completed_date","trimmie_completed_time",
   "flushing_started_date","flushing_started_time","flushing_completed_date","flushing_completed_time",
   "specific_gravity","bentonite_before","bentonite_after",
   "cement_type","concrete_grade","design_mix","slump","cubes_taken",
