@@ -2,37 +2,139 @@ const express = require("express");
 const session = require("express-session");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const ExcelJS = require("exceljs");
+const { Pool } = require("pg");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-// DATA_DIR can be overridden (e.g. to point at a Render persistent disk mount)
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "pilelog-data.json");
+// ---------- PostgreSQL database ----------
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
-// --- Login setup (username + password) ---
-// Set these as environment variables in production (e.g. on Render).
-// If not set, the app falls back to the defaults below - change them!
-const AUTH_USERNAME = process.env.AUTH_USERNAME || "admin";
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "changeme123";
-const SESSION_SECRET = process.env.SESSION_SECRET || "please-change-this-session-secret";
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(DATA_FILE)) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ piles: [] }, null, 2), "utf8");
-}
-
-function loadData() {
-  try {
-    const value = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    return value && Array.isArray(value.piles) ? value : { piles: [] };
-  } catch {
-    return { piles: [] };
+async function initDatabase() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is not set. Add your Render PostgreSQL Internal Database URL in Environment Variables."
+    );
   }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS piles (
+      id BIGSERIAL PRIMARY KEY,
+      pile_id VARCHAR(100) UNIQUE NOT NULL,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log("PostgreSQL database connected and ready.");
 }
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+function rowToPile(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    pile_id: row.pile_id,
+    ...(row.data || {}),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+async function getPiles() {
+  const result = await pool.query(`
+    SELECT id, pile_id, data, created_at, updated_at
+    FROM piles
+    ORDER BY id ASC
+  `);
+  return result.rows.map(rowToPile);
+}
+
+async function findPile(idOrPileId) {
+  const value = String(idOrPileId || "").trim();
+
+  const result = await pool.query(`
+    SELECT id, pile_id, data, created_at, updated_at
+    FROM piles
+    WHERE CAST(id AS TEXT) = $1
+       OR LOWER(TRIM(pile_id)) = LOWER($1)
+    LIMIT 1
+  `, [value]);
+
+  return rowToPile(result.rows[0]);
+}
+
+function normalizePileData(body) {
+  const data = { ...(body || {}) };
+  delete data.id;
+  delete data.pile_id;
+  delete data.created_at;
+  delete data.updated_at;
+  return data;
+}
+
+async function createPile(body) {
+  const pileId = String(body.pile_id || "").trim();
+
+  if (!pileId) {
+    const error = new Error("Pile ID is required");
+    error.status = 400;
+    throw error;
+  }
+
+  const data = normalizePileData(body);
+
+  const result = await pool.query(`
+    INSERT INTO piles (pile_id, data)
+    VALUES ($1, $2::jsonb)
+    RETURNING id, pile_id, data, created_at, updated_at
+  `, [pileId, JSON.stringify(data)]);
+
+  return rowToPile(result.rows[0]);
+}
+
+async function updatePile(idOrPileId, body) {
+  const existing = await findPile(idOrPileId);
+  if (!existing) return null;
+
+  const updated = {
+    ...existing,
+    ...(body || {}),
+    id: existing.id
+  };
+
+  const pileId = String(updated.pile_id || "").trim();
+
+  if (!pileId) {
+    const error = new Error("Pile ID is required");
+    error.status = 400;
+    throw error;
+  }
+
+  const data = normalizePileData(updated);
+
+  const result = await pool.query(`
+    UPDATE piles
+    SET pile_id = $1,
+        data = $2::jsonb,
+        updated_at = NOW()
+    WHERE id = $3
+    RETURNING id, pile_id, data, created_at, updated_at
+  `, [pileId, JSON.stringify(data), existing.id]);
+
+  return rowToPile(result.rows[0]);
+}
+
+async function deletePile(idOrPileId) {
+  const existing = await findPile(idOrPileId);
+  if (!existing) return false;
+
+  await pool.query(`DELETE FROM piles WHERE id = $1`, [existing.id]);
+  return true;
 }
 
 app.use(express.json({ limit: "5mb" }));
@@ -83,66 +185,70 @@ app.use(requireAuth);
 
 app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/api/piles", (req, res) => {
-  res.json(loadData().piles);
-});
-
-app.get("/api/piles/:id", (req, res) => {
-  const piles = loadData().piles;
-  const pile = piles.find(
-    p => String(p.id) === String(req.params.id) ||
-         String(p.pile_id || "").trim().toLowerCase() === String(req.params.id).trim().toLowerCase()
-  );
-  if (!pile) return res.status(404).json({ error: "Pile not found" });
-  res.json(pile);
-});
-
-app.post("/api/piles", (req, res) => {
-  const data = loadData();
-  const pile = req.body || {};
-  if (!String(pile.pile_id || "").trim()) {
-    return res.status(400).json({ error: "Pile ID is required" });
+app.get("/api/piles", async (req, res) => {
+  try {
+    res.json(await getPiles());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load piles" });
   }
-  if (data.piles.some(p =>
-    String(p.pile_id || "").trim().toLowerCase() === String(pile.pile_id).trim().toLowerCase()
-  )) {
-    return res.status(409).json({ error: "Pile ID already exists" });
-  }
-  pile.pile_id = String(pile.pile_id).trim();
-  pile.id = Date.now();
-  data.piles.push(pile);
-  saveData(data);
-  res.status(201).json(pile);
 });
 
-app.put("/api/piles/:id", (req, res) => {
-  const data = loadData();
-  const index = data.piles.findIndex(
-    p => String(p.id) === String(req.params.id) ||
-         String(p.pile_id || "").trim().toLowerCase() === String(req.params.id).trim().toLowerCase()
-  );
-  if (index < 0) return res.status(404).json({ error: "Pile not found" });
-
-  const updated = { ...data.piles[index], ...(req.body || {}), id: data.piles[index].id };
-  if (!String(updated.pile_id || "").trim()) {
-    return res.status(400).json({ error: "Pile ID is required" });
+app.get("/api/piles/:id", async (req, res) => {
+  try {
+    const pile = await findPile(req.params.id);
+    if (!pile) return res.status(404).json({ error: "Pile not found" });
+    res.json(pile);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load pile" });
   }
-  updated.pile_id = String(updated.pile_id).trim();
-  data.piles[index] = updated;
-  saveData(data);
-  res.json(updated);
 });
 
-app.delete("/api/piles/:id", (req, res) => {
-  const data = loadData();
-  const before = data.piles.length;
-  data.piles = data.piles.filter(
-    p => String(p.id) !== String(req.params.id) &&
-         String(p.pile_id || "").trim().toLowerCase() !== String(req.params.id).trim().toLowerCase()
-  );
-  if (data.piles.length === before) return res.status(404).json({ error: "Pile not found" });
-  saveData(data);
-  res.json({ ok: true });
+app.post("/api/piles", async (req, res) => {
+  try {
+    const pile = await createPile(req.body || {});
+    res.status(201).json(pile);
+  } catch (err) {
+    console.error(err);
+
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "Pile ID already exists" });
+    }
+
+    res.status(err.status || 500).json({
+      error: err.status ? err.message : "Failed to create pile"
+    });
+  }
+});
+
+app.put("/api/piles/:id", async (req, res) => {
+  try {
+    const pile = await updatePile(req.params.id, req.body || {});
+    if (!pile) return res.status(404).json({ error: "Pile not found" });
+    res.json(pile);
+  } catch (err) {
+    console.error(err);
+
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "Pile ID already exists" });
+    }
+
+    res.status(err.status || 500).json({
+      error: err.status ? err.message : "Failed to update pile"
+    });
+  }
+});
+
+app.delete("/api/piles/:id", async (req, res) => {
+  try {
+    const deleted = await deletePile(req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Pile not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete pile" });
+  }
 });
 
 function safeSheetName(name, used) {
@@ -467,8 +573,7 @@ function addPileSheet(workbook, pile, used) {
 
 app.get("/api/export", async (req, res) => {
   try {
-    const data = loadData();
-    let piles = data.piles;
+    let piles = await getPiles();
     if (req.query.ids) {
       const ids = String(req.query.ids).split(",").map(x=>x.trim().toLowerCase());
       piles = piles.filter(p => ids.includes(String(p.pile_id || "").trim().toLowerCase()));
@@ -479,7 +584,7 @@ app.get("/api/export", async (req, res) => {
     const used = new Set();
     piles.forEach(p => addPileSheet(workbook, p, used));
 
-    const file = path.join(DATA_DIR, `pile-bore-logs-${Date.now()}.xlsx`);
+    const file = path.join(os.tmpdir(), `pile-bore-logs-${Date.now()}.xlsx`);
     await workbook.xlsx.writeFile(file);
     res.download(file, path.basename(file), err => {
       try { fs.unlinkSync(file); } catch {}
@@ -495,6 +600,25 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`Pile Log Web App running at http://localhost:${PORT}`);
+async function startServer() {
+  try {
+    await initDatabase();
+
+    app.listen(PORT, () => {
+      console.log(`Pile Log Web App running at http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
+}
+
+startServer();
+
+process.on("SIGTERM", async () => {
+  try {
+    await pool.end();
+  } finally {
+    process.exit(0);
+  }
 });
